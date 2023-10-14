@@ -4,16 +4,16 @@
 const depth_scale = 4;
 const stats = new Stats();
 
-function loadAllTextures(baseUrl, layersIds) {
+function  loadAllTextures(baseUrl, layersIds) {
   const textureLoader = new THREE.TextureLoader()
   return layersIds.map(id => {
-    texAtlasUrl = `${baseUrl}/layer_${id}.jpg`
+    const texAtlasUrl = `${baseUrl}/layer_${id}.jpg`
     const texture = textureLoader.load(texAtlasUrl);
     texture.generateMipmaps = false;
     texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.minFilter = THREE.LinearFilter;
 
-    texAtlasAUrl = `${baseUrl}/layer_alpha_${id}.jpg`
+    const texAtlasAUrl = `${baseUrl}/layer_alpha_${id}.jpg`
     const texture_a = textureLoader.load(texAtlasAUrl);
     texture_a.generateMipmaps = false;
     texture_a.wrapS = texture_a.wrapT = THREE.ClampToEdgeWrapping;
@@ -110,22 +110,8 @@ function buildMesh(geometry, material) {
   return mesh
 }
 
-function buildScene(geometries, materials) {
-  const scene = new THREE.Scene();
-  for (let i = 0; i < geometries.length; i++) {
-    const mesh = buildMesh(geometries[i], materials[i])
-    scene.add(mesh)
-  }
-  return scene
-}
-
-async function startDisplay(inputPath, num_layers=4) {
-  const canvas = document.getElementById('viewer-canvas');
+async function buildMli3DObject(baseUrl, num_layers=4) {
   const layersIds = [...Array(num_layers).keys()].map(i => String(i).padStart(2, '0'))
-
-//   document.getElementById('viewer-path');
-  const baseUrl = inputPath
-//  const baseUrl = document.getElementById('base-path').value;
   const meta_data = await fetch(`${baseUrl}/meta.json`).then(result => result.json())
   const ref_camera = await ProjectiveCamera.from_meta(meta_data)
   ref_camera.im_height = ref_camera.im_height / depth_scale
@@ -134,39 +120,43 @@ async function startDisplay(inputPath, num_layers=4) {
   const [verts, faces, uv] = await tf_gen_planes(ref_camera.im_height, ref_camera.im_width)
   const faces_flat = faces.toInt().flatten().dataSync()
   const uv_flat = uv.flatten().dataSync()
-
   const geometries = depths.map(depth => buildGeometry(verts, faces_flat, uv_flat, depth, ref_camera))
   const textures_loaded = loadAllTextures(baseUrl, layersIds)
+  console.log(textures_loaded, "load")
   const materials = textures_loaded.map(simpleTextureMaterial)
-  const scene = buildScene(geometries, materials);
+
+  const group = new THREE.Group();
+  for (let i = 0; i < geometries.length; i++) {
+    const mesh = buildMesh(geometries[i], materials[i])
+    group.add(mesh)
+  }
+  return group
+}
+
+// display used in gallery.html
+async function startDisplay(inputPath, num_layers=4) {
+  const canvas = document.getElementById('viewer-canvas');
+
+  const scene = new THREE.Scene()
+  const mliObject = await buildMli3DObject(inputPath, num_layers)
+  scene.add(mliObject)
 
   const [camera, handler] = setupCamera(canvas);
 
   setCameraControlEvents(handler);
-  setViewModeEvents(scene.children, textures_loaded);
+  setViewModeEvents(mliObject.children);
   setStatsDsiplay();
   const renderer = setupRenderer(canvas, camera, scene);
 
   setupCameraVR(renderer)
 }
 
-
+// display used in host_scene.html, with "mouse hover" as camera movement
 async function startMainDisplay(inputPath, canvasName, idScene='scene-viewer') {
   const canvas = document.getElementById(canvasName);
-  const baseUrl = inputPath
-  const num_layers = 4;
-  const layersIds = [...Array(num_layers).keys()].map(i => String(i).padStart(2, '0'))
-//  const baseUrl = document.getElementById('base-path').value;
-  const meta_data = await fetch(`${baseUrl}/meta.json`).then(result => result.json())
-  const ref_camera = await ProjectiveCamera.from_meta(meta_data)
-  const depths = await loadAllDepths(meta_data, baseUrl, layersIds)
-  const [verts, faces, uv] = await tf_gen_planes(ref_camera.im_height, ref_camera.im_width)
-  const faces_flat = faces.toInt().flatten().dataSync()
-  const uv_flat = uv.flatten().dataSync()
-
-  const geometries = depths.map(depth => buildGeometry(verts, faces_flat, uv_flat, depth, ref_camera))
-  const materials = loadAllTextures(baseUrl, layersIds).map(simpleTextureMaterial)
-  const scene = buildScene(geometries, materials);
+  const scene = new THREE.Scene()
+  const mliObject = await buildMli3DObject(inputPath, 4)
+  scene.add(mliObject)
 
   const camera = setupNeutralHoverCamera(canvas, idScene);
 //  handler.changleHandler('hover')
@@ -174,23 +164,14 @@ async function startMainDisplay(inputPath, canvasName, idScene='scene-viewer') {
   setupRenderer(canvas, camera, scene);
 }
 
-
+// display used in plain.html with wonder as camera movement
 async function startMainDisplayPlain(inputPath, canvasName, idScene='scene-viewer') {
   const canvas = document.getElementById(canvasName);
-  const baseUrl = inputPath
-  const num_layers = 4;
-  const layersIds = [...Array(num_layers).keys()].map(i => String(i).padStart(2, '0'))
-//  const baseUrl = document.getElementById('base-path').value;
-  const meta_data = await fetch(`${baseUrl}/meta.json`).then(result => result.json())
-  const ref_camera = await ProjectiveCamera.from_meta(meta_data)
-  const depths = await loadAllDepths(meta_data, baseUrl, layersIds)
-  const [verts, faces, uv] = await tf_gen_planes(ref_camera.im_height, ref_camera.im_width)
-  const faces_flat = faces.toInt().flatten().dataSync()
-  const uv_flat = uv.flatten().dataSync()
+  const scene = new THREE.Scene()
 
-  const geometries = depths.map(depth => buildGeometry(verts, faces_flat, uv_flat, depth, ref_camera))
-  const materials = loadAllTextures(baseUrl, layersIds).map(simpleTextureMaterial)
-  const scene = buildScene(geometries, materials);
+  const mliObject = await buildMli3DObject(inputPath, 4)
+  scene.add(mliObject)
+
 //  const camera = setupCamera(canvas)
   const [camera, handler] = setupCamera(canvas);
   handler.changleHandler("wonder")
@@ -225,15 +206,18 @@ function setupCameraVR(renderer) {
   elVrBtn.addEventListener("click", e => vrCamera.toggleVR())
 }
 
-function setViewModeEvents(meshes, textures_loaded) {
+function setViewModeEvents(meshes) {
+
+  const textures_loaded = meshes.map(mesh => [mesh.material.uniforms.atlas.value, mesh.material.uniforms.atlas_a.value])
+  const normalMaterials = meshes.map(m => m.material) //
+
   function setNewMode(mode) {
-//    textures = meshes.map(mesh => mesh.material.uniforms.atlas.value)
     let materials = []
-    if (mode == "normal")
-      materials = textures_loaded.map((el) => simpleTextureMaterial(el));
+    if (mode === "normal")
+      materials = normalMaterials
     else
-      materials = textures_loaded.map((el) => depthMaterial(el, colormapName=mode));
-    for (i = 0; i < materials.length; i++)
+      materials = textures_loaded.map(t => depthMaterial(t, mode));
+    for (let i = 0; i < materials.length; i++)
       meshes[i].material = materials[i];
   }
   document.getElementById("normalViewButton").addEventListener("click", (e) => setNewMode("normal"));
